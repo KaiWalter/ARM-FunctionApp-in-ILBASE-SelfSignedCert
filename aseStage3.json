@@ -1,0 +1,135 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the Function app that you wish to create."
+      }
+    },
+    "storageAccountNameFn": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the web app that you wish to create."
+      }
+    },
+    "thumbPrint": {
+      "type": "string",
+      "metadata": {
+        "description": "Thumbprint of the SSL certificate to use."
+      }
+    },
+    "dnsSuffix": {
+      "type": "string",
+      "metadata": {
+        "description": "DNS Suffix for the ASE and App Service."
+      }
+    },
+    "appServicePlanName": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the App Service plan to use for hosting the web app."
+      }
+    },
+    "appServiceEnvironmentName": {
+      "type": "string",
+      "metadata": {
+        "description": "The name of the App Service Environment where the app service plan will be created."
+      }
+    },
+    "existingAseLocation": {
+      "type": "string",
+      "metadata": {
+        "description": "Set this to the same location as the App Service Environment"
+      }
+    },
+    "workerPool": {
+      "type": "string",
+      "allowedValues": [
+        "1",
+        "2",
+        "3"
+      ],
+      "defaultValue": 0,
+      "metadata": {
+        "description": "Defines which worker pool's (WP1, WP2 or WP3) resources will be used for the app service plan."
+      }
+    },
+    "numberOfWorkersFromWorkerPool": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": {
+        "description": "Defines the number of workers from the worker pool that will be used by the app service plan."
+      }
+    }
+  },
+  "resources": [
+    {
+      "apiVersion": "2016-09-01",
+      "name": "[parameters('appServicePlanName')]",
+      "type": "Microsoft.Web/serverfarms",
+      "location": "[parameters('existingAseLocation')]",
+      "properties": {
+        "name": "[parameters('appServicePlanName')]",
+        "hostingEnvironmentProfile": {
+          "id": "[resourceId('Microsoft.Web/hostingEnvironments',parameters('appServiceEnvironmentName'))]"
+        }
+      },
+      "sku": {
+        "name": "[concat('P',parameters('workerPool'))]",
+        "tier": "Premium",
+        "size": "[concat('P',parameters('workerPool'))]",
+        "family": "P",
+        "capacity": "[parameters('numberOfWorkersFromWorkerPool')]"
+      }
+    },
+
+    {
+      "apiVersion": "2016-08-01",
+      "name": "[parameters('functionAppName')]",
+      "type": "Microsoft.Web/sites",
+      "location": "[parameters('existingAseLocation')]",
+      "kind": "functionapp",
+      "properties": {
+        "name": "[parameters('functionAppName')]",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverFarms',parameters('appServicePlanName'))]",
+        "hostingEnvironmentProfile": {
+          "id": "[resourceId('Microsoft.Web/hostingEnvironments', parameters('appServiceEnvironmentName'))]"
+        },
+        "hostNameSslStates": [
+          {
+            "name": "[concat(parameters('functionAppName'),'.',parameters('dnsSuffix'))]",
+            "sslState": "SniEnabled",
+            "thumbprint": "[parameters('thumbPrint')]",
+            "toUpdate": "true"
+          },
+          {
+            "name": "[concat(parameters('functionAppName'),'.scm.',parameters('dnsSuffix'))]",
+            "sslState": "SniEnabled",
+            "thumbprint": "[parameters('thumbPrint')]",
+            "toUpdate": "true"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[concat('Microsoft.Web/serverFarms/',parameters('appServicePlanName'))]"
+      ],
+      "resources": [
+        {
+          "apiVersion": "2016-08-01",
+          "name": "appsettings",
+          "type": "config",
+          "dependsOn": [
+            "[resourceId('Microsoft.Web/sites', parameters('functionAppName'))]"
+          ],
+          "properties": {
+            "AzureWebJobsStorage": "[concat('DefaultEndpointsProtocol=https;AccountName=',parameters('storageAccountNameFn'),';AccountKey=',listkeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountNameFn')), '2015-05-01-preview').key1,';')]",
+            "AzureWebJobsDashboard": "[concat('DefaultEndpointsProtocol=https;AccountName=',parameters('storageAccountNameFn'),';AccountKey=',listkeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountNameFn')), '2015-05-01-preview').key1,';')]",
+            "FUNCTIONS_EXTENSION_VERSION": "~1"
+          }
+        }
+      ]
+    }
+  ]
+}

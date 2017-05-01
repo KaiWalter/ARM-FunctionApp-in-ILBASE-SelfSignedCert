@@ -1,0 +1,264 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "_artifactsLocation": {
+      "type": "string",
+      "metadata": {
+        "description": "Auto-generated container in staging storage account to receive post-build staging folder upload"
+      }
+    },
+    "_artifactsLocationSasToken": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Auto-generated token to access _artifactsLocation"
+      }
+    },
+    "functionAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Function App to be put into the ASE ILB"
+      }
+    },
+    "dnsSuffix": {
+      "type": "string",
+      "metadata": {
+        "description": "DNS suffix of the ASE ILB"
+      }
+    },
+    "aseLocation": {
+      "type": "string",
+      "allowedValues": [
+        "Central US",
+        "East US",
+        "East US 2",
+        "North Central US",
+        "South Central US",
+        "West US",
+        "Canada Central",
+        "North Europe",
+        "West Europe",
+        "East Asia",
+        "Southeast Asia",
+        "Japan East",
+        "Japan West",
+        "Brazil South",
+        "Australia East",
+        "Australia Southeast",
+        "West India",
+        "Central India",
+        "South India"
+      ],
+      "metadata": {
+        "description": "Location of the App Service Environment"
+      }
+    },
+    "virtualNetworkName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Virtual Network to put the ASE ILB into"
+      }
+    },
+    "virtualNetworkRGName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Virtual Networks Resource Group"
+      }
+    },
+    "subnetName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the Subnet to put the ASE ILB into"
+      }
+    },
+    "pfxBlobString": {
+      "type": "string",
+      "metadata": {
+        "description": "Certifcate/PFX B64 data string to be bound to ASE and APP"
+      }
+    },
+    "pfxPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password of certifcate to be bound to ASE and APP"
+      }
+    },
+    "certificateThumbprint": {
+      "type": "string",
+      "metadata": {
+        "description": "Thumbprint of certifcate to be bound to ASE and APP"
+      }
+    }
+  },
+  "variables": {
+    "aseStage1TemplateUri": "[concat(parameters('_artifactsLocation'),'/aseStage1.json',parameters('_artifactsLocationSasToken'))]",
+    "aseStage2TemplateUri": "[concat(parameters('_artifactsLocation'),'/aseStage2.json',parameters('_artifactsLocationSasToken'))]",
+    "aseStage3TemplateUri": "[concat(parameters('_artifactsLocation'),'/aseStage3.json',parameters('_artifactsLocationSasToken'))]",
+
+    // ASE definition
+    "aseName": "[concat(parameters('functionAppName'),'-ase')]",
+    "appCertificateName": "[concat(parameters('functionAppName'),'_APP')]",
+    "aseCertificateName": "[concat(parameters('functionAppName'),'_ILBASE')]",
+    "internalLoadBalancingMode": 3, // 0 = public VIP only, 1 = only ports 80/443 are mapped to ILB VIP, 2 = only FTP ports are mapped to ILB VIP, 3 = both ports 80/443 and FTP ports are mapped to an ILB VIP
+    "appServicePlanName": "[concat(parameters('functionAppName'),'-plan')]",
+    "storageAccountNameFn": "[concat(parameters('functionAppName'),'fn')]",
+    "storageAccountTypeFn": "Standard_LRS",
+
+    // API versions
+    "resourcesApiVersion": "2016-09-01",
+    "storageApiVersion": "2016-12-01",
+    "webApiVersion": "2016-03-01"
+  },
+
+  "resources": [
+    //--------------------------------------------------------------------------------
+    //App Service Environment - stage 1 - with ILB
+    //--------------------------------------------------------------------------------
+    {
+      "name": "aseStage1",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "[variables('resourcesApiVersion')]",
+      "dependsOn": [],
+      "properties": {
+        "mode": "incremental",
+        "templateLink": {
+          "uri": "[variables('aseStage1TemplateUri')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "aseName": {
+            "value": "[variables('aseName')]"
+          },
+          "aseLocation": {
+            "value": "[parameters('aseLocation')]"
+          },
+          "existingVnetResourceId": {
+            "value": "[concat('/subscriptions/',subscription().subscriptionId,'/resourceGroups/',parameters('virtualNetworkRGName'),'/providers/Microsoft.Network/virtualNetworks/', parameters('virtualNetworkName'))]"
+          },
+          "subnetName": {
+            "value": "[parameters('subnetName')]"
+          },
+          "internalLoadBalancingMode": {
+            "value": "[variables('internalLoadBalancingMode')]"
+          },
+          "dnsSuffix": {
+            "value": "[parameters('dnsSuffix')]"
+          }
+        }
+      }
+    },
+
+    //--------------------------------------------------------------------------------
+    // App Service Environment - stage 2 - with certificate
+    // --------------------------------------------------------------------------------
+    {
+      "name": "aseStage2",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "[variables('resourcesApiVersion')]",
+      "dependsOn": [
+        "[concat('Microsoft.Resources/deployments/aseStage1')]"
+      ],
+      "properties": {
+        "mode": "incremental",
+        "templateLink": {
+          "uri": "[variables('aseStage2TemplateUri')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "appServiceEnvironmentName": {
+            "value": "[variables('aseName')]"
+          },
+          "existingAseLocation": {
+            "value": "[parameters('aseLocation')]"
+          },
+          "pfxBlobString": {
+            "value": "[parameters('pfxBlobString')]"
+          },
+          "password": {
+            "value": "[parameters('pfxPassword')]"
+          },
+          "certificateThumbprint": {
+            "value": "[parameters('certificateThumbprint')]"
+          },
+          "certificateName": {
+            "value": "[variables('aseCertificateName')]"
+          }
+        }
+      }
+    },
+
+    // --------------------------------------------------------------------------------
+    // App Service Environment - stage 3 - App Service Plan with Function App
+    // --------------------------------------------------------------------------------
+    {
+      "name": "[variables('storageAccountNameFn')]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "kind": "Storage",
+      "apiVersion": "[variables('storageApiVersion')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "[variables('storageAccountTypeFn')]"
+      }
+    },
+
+    {
+      "name": "[variables('appCertificateName')]",
+      "apiVersion": "[variables('webApiVersion')]",
+      "type": "Microsoft.Web/certificates",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "pfxBlob": "[parameters('pfxBlobString')]",
+        "password": "[parameters('pfxPassword')]"
+      },
+      "tags": {
+        "displayName": "App Certificate"
+      }
+    },
+
+    {
+      "name": "aseStage3",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "[variables('resourcesApiVersion')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountNameFn'))]",
+        "[concat('Microsoft.Resources/deployments/aseStage2')]",
+        "[resourceId('Microsoft.Web/certificates', variables('appCertificateName'))]"
+      ],
+      "properties": {
+        "mode": "incremental",
+        "templateLink": {
+          "uri": "[variables('aseStage3TemplateUri')]",
+          "contentVersion": "1.0.0.0"
+        },
+        "parameters": {
+          "functionAppName": {
+            "value": "[parameters('functionAppName')]"
+          },
+          "storageAccountNameFn": {
+            "value": "[variables('storageAccountNameFn')]"
+          },
+          "appServicePlanName": {
+            "value": "[variables('appServicePlanName')]"
+          },
+          "appServiceEnvironmentName": {
+            "value": "[variables('aseName')]"
+          },
+          "existingAseLocation": {
+            "value": "[parameters('aseLocation')]"
+          },
+          "workerPool": {
+            "value": "1"
+          },
+          "dnsSuffix": {
+            "value": "[parameters('dnsSuffix')]"
+          },
+          "thumbPrint": {
+            "value": "[reference(resourceId('Microsoft.Web/certificates', variables('appCertificateName'))).Thumbprint]"
+          }
+        }
+      }
+    }
+
+  ],
+  "outputs": {}
+}
